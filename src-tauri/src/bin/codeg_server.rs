@@ -21,6 +21,11 @@ fn main() -> ExitCode {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
+    // `--help` used to fall through and start the server.
+    if asks_for_help(&args) {
+        print!("{}", help_text());
+        return ExitCode::SUCCESS;
+    }
 
     // `--supervise`: run as the process supervisor that owns the worker's
     // lifecycle (PID 1 in Docker). It spawns `codeg-server` without this
@@ -904,6 +909,39 @@ fn beside_the_desktop_app(exe: &std::path::Path) -> bool {
         .is_some_and(|dir| dir.join("codeg.exe").is_file())
 }
 
+/// Whether the command line asks for `--help` / `-h`.
+fn asks_for_help(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == "--help" || a == "-h")
+}
+
+/// What `codeg-server --help` prints. The server is configured through
+/// environment variables, so that is mostly what it lists.
+fn help_text() -> String {
+    format!(
+        "codeg-server {version}
+Run Codeg headless and open it from a browser.
+
+Usage: codeg-server [OPTIONS]
+
+Options:
+  -h, --help     Print this help and exit
+  -V, --version  Print the version and exit
+
+Environment:
+  CODEG_PORT          Port to listen on (default: 3080)
+  CODEG_HOST          Address to bind (default: 0.0.0.0)
+  CODEG_TOKEN         Access token (default: generated once and saved)
+  CODEG_DATA_DIR      Data directory (default: {data_dir})
+  CODEG_STATIC_DIR    Directory of the web UI files
+  CODEG_COMPUTER_USE  Set to 1 to let agents use this machine's screen
+
+Docs: https://docs.codeg.app/getting-started/configuration
+",
+        version = env!("CARGO_PKG_VERSION"),
+        data_dir = default_data_dir().display(),
+    )
+}
+
 fn default_data_dir() -> PathBuf {
     dirs::data_dir()
         .map(|d| d.join("codeg"))
@@ -939,5 +977,31 @@ mod tests {
             assert!(!computer_use_requested_by(Some(no)), "{no}");
         }
         assert!(!computer_use_requested_by(None));
+    }
+
+    /// `--help` and `-h` print the help instead of starting the server, and
+    /// the help names every variable the server is configured by.
+    #[test]
+    fn help_is_asked_for_and_lists_the_configuration() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert!(asks_for_help(&args(&["codeg-server", "--help"])));
+        assert!(asks_for_help(&args(&["codeg-server", "-h"])));
+        assert!(!asks_for_help(&args(&["codeg-server"])));
+        assert!(!asks_for_help(&args(&["--help"])), "argv[0] is not a flag");
+        assert!(!asks_for_help(&args(&["codeg-server", "--helper"])));
+
+        let help = help_text();
+        for name in [
+            "--help",
+            "--version",
+            "CODEG_PORT",
+            "CODEG_HOST",
+            "CODEG_TOKEN",
+            "CODEG_DATA_DIR",
+            "CODEG_STATIC_DIR",
+            "CODEG_COMPUTER_USE",
+        ] {
+            assert!(help.contains(name), "{name} missing from --help");
+        }
     }
 }
